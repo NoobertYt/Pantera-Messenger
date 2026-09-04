@@ -1,0 +1,6 @@
+{
+  "name": "Пантера",
+  "description": "Мессенджер Пантера — быстрый и безопасный мессенджер в темной неоново-фиолетовой гамме со звонками, гудками, стикерами, фото и группами.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
