@@ -23,9 +23,10 @@ import {
   Image as ImageIcon,
   User,
   Crown,
-  Lock
+  Lock,
+  Ban
 } from 'lucide-react';
-import { UserBadge } from './UserBadge';
+import { UserBadge, isUserBanned } from './UserBadge';
 
 interface ChatViewProps {
   chat: ChatConversation;
@@ -52,6 +53,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ chat, onBack, onStartCall, o
   const isGroup = chat.type === 'group';
   const otherUid = isGroup ? null : chat.participants.find((id) => id !== currentUser?.uid);
   const isBlocked = otherUid ? isUserBlocked(otherUid) : false;
+  const isCurrentBanned = isUserBanned(currentUser);
   const isRestrictedByPro = !isGroup && Boolean(otherUser?.onlyProCanMessage) && !isPro && !isAdmin;
 
   // Fetch other participant profile
@@ -120,7 +122,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ chat, onBack, onStartCall, o
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!currentUser) return;
-    if (isBlocked || isRestrictedByPro) return;
+    if (isCurrentBanned || isBlocked || isRestrictedByPro) return;
 
     const trimmed = inputText.trim();
     if (!trimmed && !selectedPhoto) return;
@@ -160,7 +162,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ chat, onBack, onStartCall, o
   };
 
   const handleSelectSticker = async (sticker: StickerItem) => {
-    if (!currentUser || isBlocked) return;
+    if (!currentUser || isCurrentBanned || isBlocked) return;
     setShowStickers(false);
     const currentReply = replyingTo;
     setReplyingTo(null);
@@ -192,7 +194,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ chat, onBack, onStartCall, o
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || isCurrentBanned) return;
 
     if (file.size > 15 * 1024 * 1024) {
       alert('Файл слишком большой. Максимальный размер: 15 МБ');
@@ -296,19 +298,33 @@ export const ChatView: React.FC<ChatViewProps> = ({ chat, onBack, onStartCall, o
             <>
               <button
                 id="btn-voice-call"
-                onClick={() => onStartCall(otherUser, 'audio')}
-                disabled={isBlocked}
-                className="w-10 h-10 rounded-full flex items-center justify-center bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-900/30 transition cursor-pointer disabled:opacity-30"
-                title="Позвонить (голосовой вызов с гудками)"
+                onClick={() => {
+                  if (isCurrentBanned) return;
+                  onStartCall(otherUser, 'audio');
+                }}
+                disabled={isBlocked || isCurrentBanned}
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition ${
+                  isCurrentBanned
+                    ? 'bg-zinc-800 text-zinc-600 opacity-40 cursor-not-allowed'
+                    : 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-900/30 cursor-pointer disabled:opacity-30'
+                }`}
+                title={isCurrentBanned ? 'Ваш аккаунт заблокирован (БАН)' : 'Позвонить (голосовой вызов)'}
               >
                 <Phone className="w-4 h-4 fill-white" />
               </button>
               <button
                 id="btn-video-call"
-                onClick={() => onStartCall(otherUser, 'video')}
-                disabled={isBlocked}
-                className="w-10 h-10 rounded-full flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 transition cursor-pointer disabled:opacity-30"
-                title="Видеозвонок с гудками"
+                onClick={() => {
+                  if (isCurrentBanned) return;
+                  onStartCall(otherUser, 'video');
+                }}
+                disabled={isBlocked || isCurrentBanned}
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition ${
+                  isCurrentBanned
+                    ? 'text-zinc-600 opacity-40 cursor-not-allowed'
+                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800 cursor-pointer disabled:opacity-30'
+                }`}
+                title={isCurrentBanned ? 'Ваш аккаунт заблокирован (БАН)' : 'Видеозвонок'}
               >
                 <Video className="w-4 h-4" />
               </button>
@@ -383,9 +399,10 @@ export const ChatView: React.FC<ChatViewProps> = ({ chat, onBack, onStartCall, o
             ? (currentUser?.displayName || msg.senderName)
             : msg.senderName;
 
-          // Status calculation: Admin, PRO, or none
+          // Status calculation: Admin, PRO, Ban, or none
           const senderIsAdmin = isMe ? isAdmin : Boolean(msg.senderIsAdmin);
           const senderIsPro = isMe ? isPro : Boolean(msg.senderIsPro);
+          const senderIsBanned = isMe ? isCurrentBanned : (otherUser && msg.senderId === otherUser.uid ? isUserBanned(otherUser) : Boolean(msg.senderIsBanned));
           const senderBadgeIcon = isMe ? currentUser?.proBadgeIcon : msg.senderProBadge;
 
           return (
@@ -418,12 +435,16 @@ export const ChatView: React.FC<ChatViewProps> = ({ chat, onBack, onStartCall, o
               <div
                 className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[82%] sm:max-w-[70%] space-y-1`}
               >
-                {/* Header with Sender Name and Subscription Badge (Админ / PRO / ничего) */}
+                {/* Header with Sender Name and Subscription Badge (Админ / PRO / БАН / ничего) */}
                 <div className={`flex items-center gap-1.5 px-1 ${isMe ? 'flex-row-reverse' : ''}`}>
                   <span className={`font-semibold text-xs ${isMe ? 'text-purple-200' : 'text-zinc-300'}`}>
                     {senderName}
                   </span>
-                  {senderIsAdmin ? (
+                  {senderIsBanned ? (
+                    <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-gradient-to-r from-red-700 via-red-600 to-rose-700 text-white shadow-[0_0_8px_rgba(239,68,68,0.5)] border border-red-500 flex-shrink-0 flex items-center gap-0.5">
+                      🚫 БАН
+                    </span>
+                  ) : senderIsAdmin ? (
                     <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white shadow-[0_0_8px_rgba(225,29,72,0.4)] border border-rose-400/40 flex-shrink-0">
                       🛡️ Админ
                     </span>
@@ -569,8 +590,28 @@ export const ChatView: React.FC<ChatViewProps> = ({ chat, onBack, onStartCall, o
         </div>
       )}
 
-      {/* Input area, Blocked Notice, or PRO Restriction */}
-      {isBlocked ? (
+      {/* Input area, Banned Notice, Blocked Notice, or PRO Restriction */}
+      {isCurrentBanned ? (
+        <div className="p-5 border-t border-red-900/50 bg-[#160a0c] flex flex-col items-center justify-center gap-1.5 text-center">
+          <div className="flex items-center gap-2 text-red-400 text-xs font-bold">
+            <Ban className="w-4 h-4" />
+            <span>Ваш аккаунт заблокирован (БАН)</span>
+          </div>
+          <p className="text-xs text-red-300/80 max-w-md">
+            Вам запрещено отправлять сообщения, фотографии, стикеры и совершать звонки.
+            {currentUser?.bannedUntil && (
+              <span className="block mt-1 text-[11px] text-zinc-400">
+                Срок бана: до {new Date(currentUser.bannedUntil).toLocaleString('ru')}
+              </span>
+            )}
+            {currentUser?.banReason && (
+              <span className="block text-[11px] text-zinc-400">
+                Причина: {currentUser.banReason}
+              </span>
+            )}
+          </p>
+        </div>
+      ) : isBlocked ? (
         <div className="p-5 border-t border-zinc-800/80 bg-[#0c0c0e] flex items-center justify-center gap-2 text-xs text-red-400 font-semibold">
           <ShieldAlert className="w-4 h-4" />
           Пользователь в черном списке (ЧС). Отправка сообщений заблокирована.

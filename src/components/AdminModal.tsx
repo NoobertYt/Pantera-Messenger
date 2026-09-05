@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile } from '../types';
 import { chatService } from '../services/chatService';
-import { ADMIN_EMAIL, UserBadge, isUserAdmin, isUserPro, isUserBanned, isUserFrozen } from './UserBadge';
+import { ADMIN_EMAIL, UserBadge, isUserAdmin, isUserPro, isUserBanned } from './UserBadge';
 import { useAuth } from '../context/AuthContext';
+import { soundService, CustomRingtoneMetadata } from '../services/audioService';
 import {
   Shield,
   Search,
@@ -13,7 +14,6 @@ import {
   Edit3,
   Check,
   AlertTriangle,
-  Snowflake,
   User,
   AtSign,
   Sparkles,
@@ -21,7 +21,17 @@ import {
   Unlock,
   RefreshCw,
   Sliders,
-  ChevronRight
+  ChevronRight,
+  Music,
+  Play,
+  Square,
+  Volume2,
+  Upload,
+  RotateCcw,
+  FileAudio,
+  Globe,
+  Radio,
+  CheckCircle2
 } from 'lucide-react';
 
 interface AdminModalProps {
@@ -43,9 +53,24 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(initialSelectedUser || null);
-  const [activeTab, setActiveTab] = useState<'all' | 'pro' | 'banned' | 'frozen'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'pro' | 'banned' | 'ringtone'>('all');
   const [isSaving, setIsSaving] = useState(false);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+
+  // Global Ringtone state
+  const [ringtoneMeta, setRingtoneMeta] = useState<CustomRingtoneMetadata | null>(
+    soundService.getCustomRingtoneMeta()
+  );
+  const [isPlayingRingtone, setIsPlayingRingtone] = useState(soundService.getIsPreviewPlaying());
+  const [selectedRingtoneFile, setSelectedRingtoneFile] = useState<File | null>(null);
+  const [isUploadingRingtone, setIsUploadingRingtone] = useState(false);
+  const [ringtoneProgress, setRingtoneProgress] = useState(0);
+  const [ringtoneStage, setRingtoneStage] = useState('');
+  const [directUrlInput, setDirectUrlInput] = useState('');
+  const [directUrlTitle, setDirectUrlTitle] = useState('');
+  const [isDragOverRingtone, setIsDragOverRingtone] = useState(false);
+  const [ringtoneUploadError, setRingtoneUploadError] = useState<string | null>(null);
+  const ringtoneFileInputRef = useRef<HTMLInputElement>(null);
 
   // Quick PRO Grant by Username (@юз)
   const [quickProUsername, setQuickProUsername] = useState('');
@@ -61,11 +86,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [showBanDialog, setShowBanDialog] = useState(false);
   const [banDurationHours, setBanDurationHours] = useState<number | null>(24);
   const [banReasonInput, setBanReasonInput] = useState('Нарушение правил сообщества');
-
-  // Freeze Dialog state
-  const [showFreezeDialog, setShowFreezeDialog] = useState(false);
-  const [freezeDurationMinutes, setFreezeDurationMinutes] = useState<number | null>(60);
-  const [freezeReasonInput, setFreezeReasonInput] = useState('Флуд / подозрительная активность');
 
   // PRO Dialog state
   const [showProDialog, setShowProDialog] = useState(false);
@@ -92,6 +112,100 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   useEffect(() => {
     refreshUsers();
   }, [currentUser?.uid]);
+
+  // Subscribe to real-time ringtone status & preview
+  useEffect(() => {
+    const unsubPreview = soundService.subscribePreview((playing) => {
+      setIsPlayingRingtone(playing);
+    });
+    const unsubMeta = soundService.subscribeCustomRingtone((meta) => {
+      setRingtoneMeta(meta);
+    });
+    return () => {
+      unsubPreview();
+      unsubMeta();
+      soundService.stopAll();
+    };
+  }, []);
+
+  const handleAdminSelectAudioFile = (file: File) => {
+    setRingtoneUploadError(null);
+    const validExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.webm'];
+    const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+    if (!file.type.startsWith('audio/') && !validExtensions.includes(ext)) {
+      setRingtoneUploadError('Пожалуйста, выберите корректный аудиофайл (.mp3, .wav, .ogg, .m4a)');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setRingtoneUploadError('Размер файла превышает 20 МБ. Рекомендуется файл до 10-15 МБ.');
+      return;
+    }
+    setSelectedRingtoneFile(file);
+  };
+
+  const handleAdminApplyUploadedRingtone = async () => {
+    if (!selectedRingtoneFile) return;
+    setIsUploadingRingtone(true);
+    setRingtoneUploadError(null);
+    try {
+      const adminName = currentUser?.displayName || currentUser?.username || 'Администратор';
+      const meta = await soundService.adminSetGlobalRingtoneFromFile(
+        selectedRingtoneFile,
+        adminName,
+        (pct, stage) => {
+          setRingtoneProgress(pct);
+          setRingtoneStage(stage);
+        }
+      );
+      setSelectedRingtoneFile(null);
+      showNotice(`🎉 Рингтон "${meta.name}" установлен для всех пользователей!`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка при загрузке рингтона';
+      setRingtoneUploadError(msg);
+    } finally {
+      setIsUploadingRingtone(false);
+      setRingtoneProgress(0);
+      setRingtoneStage('');
+      if (ringtoneFileInputRef.current) ringtoneFileInputRef.current.value = '';
+    }
+  };
+
+  const handleAdminApplyUrlRingtone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!directUrlInput.trim()) return;
+    setIsUploadingRingtone(true);
+    setRingtoneUploadError(null);
+    try {
+      const adminName = currentUser?.displayName || currentUser?.username || 'Администратор';
+      const meta = await soundService.adminSetGlobalRingtoneFromUrl(
+        directUrlInput.trim(),
+        directUrlTitle.trim(),
+        adminName
+      );
+      setDirectUrlInput('');
+      setDirectUrlTitle('');
+      showNotice(`🎉 Рингтон "${meta.name}" установлен по ссылке для всех пользователей!`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка загрузки по ссылке';
+      setRingtoneUploadError(msg);
+    } finally {
+      setIsUploadingRingtone(false);
+    }
+  };
+
+  const handleAdminResetRingtone = async () => {
+    if (!confirm('Вернуть стандартную мелодию ("Serebro — Мало тебя") для всех пользователей?')) return;
+    setIsUploadingRingtone(true);
+    try {
+      const adminName = currentUser?.displayName || currentUser?.username || 'Администратор';
+      await soundService.adminResetGlobalRingtone(adminName);
+      showNotice('Стандартная мелодия установлена для всех пользователей');
+    } catch {
+      showNotice('Ошибка при сбросе рингтона');
+    } finally {
+      setIsUploadingRingtone(false);
+    }
+  };
 
   const showNotice = (text: string) => {
     setNoticeMessage(text);
@@ -170,7 +284,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
     if (activeTab === 'pro') return isUserPro(u);
     if (activeTab === 'banned') return isUserBanned(u);
-    if (activeTab === 'frozen') return isUserFrozen(u);
     return true;
   });
 
@@ -232,40 +345,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  // Action: Toggle or set FREEZE
-  const handleApplyFreeze = async (isFrozen: boolean) => {
-    if (!selectedUser) return;
-    if (isUserAdmin(selectedUser)) {
-      showNotice('Нельзя заморозить Администратора');
-      return;
-    }
-    setIsSaving(true);
-    try {
-      await chatService.adminFreezeUser(
-        selectedUser.uid,
-        isFrozen,
-        isFrozen ? freezeDurationMinutes : null,
-        isFrozen ? freezeReasonInput : undefined
-      );
-
-      const updatedUser: UserProfile = {
-        ...selectedUser,
-        isFrozen,
-        frozenUntil: isFrozen && freezeDurationMinutes ? Date.now() + freezeDurationMinutes * 60 * 1000 : null,
-        freezeReason: isFrozen ? freezeReasonInput : undefined,
-        frozenAt: isFrozen ? Date.now() : undefined
-      };
-      setSelectedUser(updatedUser);
-      setUsers((prev) => prev.map((u) => (u.uid === selectedUser.uid ? updatedUser : u)));
-      setShowFreezeDialog(false);
-      showNotice(isFrozen ? `Пользователь @${selectedUser.username} заморожен` : `Заморозка снята`);
-    } catch {
-      showNotice('Ошибка выполнения операции');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   // Action: Toggle or set PRO
   const handleApplyPro = async (isPro: boolean) => {
     if (!selectedUser) return;
@@ -300,7 +379,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const totalCount = users.length;
   const proCount = users.filter((u) => isUserPro(u)).length;
   const bannedCount = users.filter((u) => isUserBanned(u)).length;
-  const frozenCount = users.filter((u) => isUserFrozen(u)).length;
 
   return (
     <div id="admin-panel-overlay" className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
@@ -342,13 +420,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </div>
         )}
 
-        {/* Quick Stats Bar */}
+        {/* Quick Stats & Navigation Bar */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 sm:p-4 bg-[#121216] border-b border-zinc-800/60">
           <button
             onClick={() => setActiveTab('all')}
-            className={`p-2.5 rounded-xl border text-left transition ${
+            className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
               activeTab === 'all'
-                ? 'bg-zinc-800/80 border-purple-500/50'
+                ? 'bg-zinc-800/80 border-purple-500/50 ring-1 ring-purple-500/30'
                 : 'bg-zinc-900/40 border-zinc-800 hover:bg-zinc-800/40'
             }`}
           >
@@ -358,9 +436,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
           <button
             onClick={() => setActiveTab('pro')}
-            className={`p-2.5 rounded-xl border text-left transition ${
+            className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
               activeTab === 'pro'
-                ? 'bg-amber-950/30 border-amber-500/50'
+                ? 'bg-amber-950/30 border-amber-500/50 ring-1 ring-amber-500/30'
                 : 'bg-zinc-900/40 border-zinc-800 hover:bg-zinc-800/40'
             }`}
           >
@@ -372,9 +450,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
           <button
             onClick={() => setActiveTab('banned')}
-            className={`p-2.5 rounded-xl border text-left transition ${
+            className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
               activeTab === 'banned'
-                ? 'bg-red-950/30 border-red-500/50'
+                ? 'bg-red-950/30 border-red-500/50 ring-1 ring-red-500/30'
                 : 'bg-zinc-900/40 border-zinc-800 hover:bg-zinc-800/40'
             }`}
           >
@@ -385,82 +463,394 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('frozen')}
-            className={`p-2.5 rounded-xl border text-left transition ${
-              activeTab === 'frozen'
-                ? 'bg-cyan-950/30 border-cyan-500/50'
+            onClick={() => setActiveTab('ringtone')}
+            className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+              activeTab === 'ringtone'
+                ? 'bg-purple-950/40 border-purple-500 ring-1 ring-purple-500/40'
                 : 'bg-zinc-900/40 border-zinc-800 hover:bg-zinc-800/40'
             }`}
           >
-            <div className="text-[10px] text-cyan-400 uppercase font-semibold flex items-center gap-1">
-              <Snowflake className="w-3 h-3" /> Заморожено
+            <div className="text-[10px] text-purple-400 uppercase font-semibold flex items-center gap-1 truncate">
+              <Music className="w-3 h-3 text-purple-400" /> Рингтон для всех
             </div>
-            <div className="text-lg font-black text-cyan-300">{frozenCount}</div>
+            <div className="text-xs font-black text-purple-200 truncate mt-1">
+              {soundService.getRingtoneTitle().length > 18
+                ? soundService.getRingtoneTitle().slice(0, 18) + '...'
+                : soundService.getRingtoneTitle()}
+            </div>
           </button>
         </div>
 
-        {/* Quick Issue PRO by Username Banner ("спомощю юза") */}
-        <div className="bg-gradient-to-r from-amber-950/40 via-purple-950/45 to-[#121216] border-b border-amber-500/25 p-3 sm:p-4">
-          <form onSubmit={handleQuickGrantProByUsername} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 text-sm">
-                👑
-              </span>
-              <span className="text-xs font-bold text-amber-200 whitespace-nowrap">
-                Выдать PRO по юзу:
-              </span>
+        {activeTab === 'ringtone' ? (
+          /* Dedicated Global Ringtone Management Room */
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-[#0c0c0e]">
+            {/* Header Banner */}
+            <div className="bg-gradient-to-r from-purple-950/60 via-indigo-950/40 to-black border border-purple-500/30 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-purple-600/20 border border-purple-500/40 text-purple-300 flex items-center justify-center flex-shrink-0">
+                  <Music className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm sm:text-base font-black text-white">Общесистемный рингтон</h2>
+                    <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold uppercase">
+                      ЕДИНЫЙ ЗВУК ДЛЯ ВСЕХ
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-1 max-w-xl leading-relaxed">
+                    Загруженная или указанная вами мелодия мгновенно устанавливается для <strong>всех пользователей</strong> сервиса «Пантера» как основной рингтон при входящих и исходящих звонках.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-center">
+                <span className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-2.5 py-1 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  Автосинхронизация активна
+                </span>
+              </div>
             </div>
 
-            <div className="relative flex-1 min-w-[140px]">
-              <span className="absolute left-2.5 top-2 text-amber-400/80 font-mono text-xs font-bold pointer-events-none">@</span>
-              <input
-                type="text"
-                value={quickProUsername}
-                onChange={(e) => setQuickProUsername(e.target.value)}
-                placeholder="username"
-                className="w-full bg-black/40 border border-amber-500/30 rounded-xl pl-6 pr-2.5 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 font-mono focus:outline-none focus:border-amber-400"
-              />
+            {/* Current Active Ringtone Card */}
+            <div className="bg-[#121216] border border-zinc-800/80 rounded-2xl p-4 sm:p-5">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-zinc-800/70">
+                <div className="flex items-start gap-3.5">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 border ${
+                    ringtoneMeta
+                      ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                      : 'bg-zinc-800/80 border-zinc-700 text-zinc-300'
+                  }`}>
+                    {ringtoneMeta ? <FileAudio className="w-6 h-6" /> : <Music className="w-6 h-6" />}
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-zinc-400 font-bold flex items-center gap-2">
+                      <span>Текущий установленный рингтон</span>
+                      {ringtoneMeta ? (
+                        <span className="text-[9px] bg-purple-950/80 text-purple-300 border border-purple-600/50 px-1.5 py-0.2 rounded font-extrabold">
+                          КАСТОМНЫЙ
+                        </span>
+                      ) : (
+                        <span className="text-[9px] bg-zinc-800 text-zinc-300 border border-zinc-700 px-1.5 py-0.2 rounded font-extrabold">
+                          СТАНДАРТНЫЙ
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-base font-black text-zinc-100 mt-0.5">
+                      {soundService.getRingtoneTitle()}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-400 mt-1">
+                      <span>Установил: <strong className="text-zinc-300">{ringtoneMeta?.updatedBy || 'Администрация'}</strong></span>
+                      <span>•</span>
+                      <span>
+                        Обновлено: <strong className="text-zinc-300">{ringtoneMeta?.updatedAt ? new Date(ringtoneMeta.updatedAt).toLocaleString('ru') : 'По умолчанию'}</strong>
+                      </span>
+                      {ringtoneMeta?.size ? (
+                        <>
+                          <span>•</span>
+                          <span>Размер: <strong className="text-zinc-300">{(ringtoneMeta.size / (1024 * 1024)).toFixed(2)} МБ</strong></span>
+                        </>
+                      ) : null}
+                      {ringtoneMeta?.duration ? (
+                        <>
+                          <span>•</span>
+                          <span>Длительность: <strong className="text-zinc-300">{Math.round(ringtoneMeta.duration)} сек.</strong></span>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Play / Reset buttons */}
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => soundService.togglePreviewRingtone()}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-md ${
+                      isPlayingRingtone
+                        ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-950/50 animate-pulse'
+                        : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-950/50'
+                    }`}
+                  >
+                    {isPlayingRingtone ? (
+                      <>
+                        <Square className="w-4 h-4 fill-current" />
+                        <span>Остановить тест</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-current" />
+                        <span>Прослушать мелодию</span>
+                      </>
+                    )}
+                  </button>
+
+                  {ringtoneMeta && (
+                    <button
+                      type="button"
+                      onClick={handleAdminResetRingtone}
+                      disabled={isUploadingRingtone}
+                      className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-zinc-800 hover:bg-red-950/60 hover:text-red-300 border border-zinc-700 hover:border-red-800/60 text-zinc-300 transition cursor-pointer flex items-center gap-1.5"
+                      title="Сбросить на стандартную мелодию"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Сбросить на стандартный</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Waveform visualizer */}
+              {isPlayingRingtone && (
+                <div className="flex items-center justify-center gap-1.5 py-3 px-4 mt-3 rounded-xl bg-purple-950/40 border border-purple-500/30">
+                  {[35, 70, 50, 95, 60, 40, 85, 100, 75, 45, 90, 65, 80, 50, 95, 70, 40, 85, 60, 90].map((h, i) => (
+                    <span
+                      key={i}
+                      style={{ height: `${h * 0.28}px` }}
+                      className="w-1 bg-purple-400 rounded-full animate-pulse"
+                    />
+                  ))}
+                  <span className="text-xs text-purple-200 font-mono ml-3 font-semibold">
+                    Тестовое воспроизведение рингтона...
+                  </span>
+                </div>
+              )}
             </div>
 
-            {/* Duration selector */}
-            <select
-              value={quickProDuration === null ? 'perm' : quickProDuration}
-              onChange={(e) => {
-                const v = e.target.value;
-                setQuickProDuration(v === 'perm' ? null : Number(v));
-              }}
-              className="bg-zinc-900 border border-zinc-700 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-400 cursor-pointer"
-            >
-              <option value="7">7 дней</option>
-              <option value="30">30 дней</option>
-              <option value="90">3 месяца</option>
-              <option value="365">1 год</option>
-              <option value="perm">Навсегда</option>
-            </select>
+            {/* Section: Set New Ringtone for All Users */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Method 1: File Upload (MP3, WAV, OGG, M4A) */}
+              <div className="bg-[#121216] border border-zinc-800/80 rounded-2xl p-4 sm:p-5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center">
+                      <Upload className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-100">Загрузить MP3 файл с устройства</h3>
+                      <p className="text-[11px] text-zinc-400">Поддерживаются форматы MP3, WAV, OGG, M4A (до 20 МБ)</p>
+                    </div>
+                  </div>
 
-            {/* Icon badge selector */}
-            <select
-              value={quickProIcon}
-              onChange={(e) => setQuickProIcon(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 rounded-xl px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-400 cursor-pointer"
-            >
-              <option value="👑">👑 Корона</option>
-              <option value="💎">💎 Алмаз</option>
-              <option value="⚡">⚡ Молния</option>
-              <option value="🔥">🔥 Огонь</option>
-              <option value="⭐">⭐ Звезда</option>
-            </select>
+                  <input
+                    type="file"
+                    ref={ringtoneFileInputRef}
+                    accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleAdminSelectAudioFile(file);
+                    }}
+                  />
 
-            <button
-              type="submit"
-              disabled={isQuickGranting || !quickProUsername.trim()}
-              className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 text-zinc-950 font-bold text-xs shadow-md shadow-amber-500/20 transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
-            >
-              <Crown className="w-3.5 h-3.5 fill-zinc-950" />
-              <span>{isQuickGranting ? 'Выдача...' : 'Выдать PRO'}</span>
-            </button>
-          </form>
-        </div>
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDragOverRingtone(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      setIsDragOverRingtone(false);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragOverRingtone(false);
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) handleAdminSelectAudioFile(file);
+                    }}
+                    onClick={() => ringtoneFileInputRef.current?.click()}
+                    className={`mt-3 p-4 rounded-xl border-2 border-dashed transition flex flex-col items-center justify-center text-center cursor-pointer min-h-[120px] ${
+                      isDragOverRingtone
+                        ? 'border-purple-500 bg-purple-950/50 text-purple-100 ring-2 ring-purple-500/30'
+                        : selectedRingtoneFile
+                        ? 'border-purple-500/70 bg-purple-950/20 text-purple-200'
+                        : 'border-zinc-700/80 hover:border-purple-500/60 bg-zinc-900/40 hover:bg-zinc-900/80 text-zinc-300'
+                    }`}
+                  >
+                    {selectedRingtoneFile ? (
+                      <div className="flex flex-col items-center gap-1.5">
+                        <FileAudio className="w-8 h-8 text-purple-400 animate-bounce" />
+                        <div className="text-xs font-bold text-white max-w-[280px] truncate">
+                          {selectedRingtoneFile.name}
+                        </div>
+                        <div className="text-[10px] text-zinc-400 font-mono">
+                          {(selectedRingtoneFile.size / (1024 * 1024)).toFixed(2)} МБ • Нажмите, чтобы выбрать другой
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1.5">
+                        <Upload className="w-7 h-7 text-zinc-400 mb-1" />
+                        <div className="text-xs font-semibold text-zinc-200">
+                          Нажмите для выбора файла или перетащите MP3 сюда
+                        </div>
+                        <div className="text-[10px] text-zinc-500">
+                          Файл будет сохранен в облаке и немедленно применен для всех
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {ringtoneUploadError && (
+                    <div className="mt-3 p-2.5 rounded-xl bg-red-950/40 border border-red-900/50 text-xs text-red-400 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      <span>{ringtoneUploadError}</span>
+                    </div>
+                  )}
+
+                  {isUploadingRingtone && (
+                    <div className="mt-3 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs font-semibold text-purple-300">
+                        <span className="flex items-center gap-1.5">
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          {ringtoneStage || 'Загрузка рингтона на сервер...'}
+                        </span>
+                        <span className="font-mono">{ringtoneProgress}%</span>
+                      </div>
+                      <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="bg-gradient-to-r from-purple-500 to-indigo-500 h-2 transition-all duration-300"
+                          style={{ width: `${ringtoneProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAdminApplyUploadedRingtone}
+                  disabled={!selectedRingtoneFile || isUploadingRingtone}
+                  className="mt-4 w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 via-purple-500 to-indigo-600 hover:opacity-95 disabled:opacity-40 text-white font-bold text-xs shadow-lg shadow-purple-950/50 transition cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>{isUploadingRingtone ? 'Установка для всех...' : 'Установить эту мелодию для всех пользователей'}</span>
+                </button>
+              </div>
+
+              {/* Method 2: Direct URL */}
+              <div className="bg-[#121216] border border-zinc-800/80 rounded-2xl p-4 sm:p-5 flex flex-col justify-between">
+                <form onSubmit={handleAdminApplyUrlRingtone} className="space-y-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center">
+                      <Globe className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-100">Установить рингтон по прямой ссылке</h3>
+                      <p className="text-[11px] text-zinc-400">Прямая ссылка на MP3 или аудиофайл в интернете</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] text-zinc-400 uppercase font-semibold mb-1">
+                      Название мелодии (необязательно):
+                    </label>
+                    <input
+                      type="text"
+                      value={directUrlTitle}
+                      onChange={(e) => setDirectUrlTitle(e.target.value)}
+                      placeholder="Например: Мой любимый трек"
+                      className="w-full bg-[#18181e] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] text-zinc-400 uppercase font-semibold mb-1">
+                      Прямой URL адрес аудиофайла:
+                    </label>
+                    <input
+                      type="url"
+                      value={directUrlInput}
+                      onChange={(e) => setDirectUrlInput(e.target.value)}
+                      placeholder="https://example.com/audio/ringtone.mp3"
+                      className="w-full bg-[#18181e] border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 font-mono focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    💡 Аудиофайл будет скачан сервером и мгновенно применен для всех пользователей мессенджера.
+                  </p>
+
+                  <button
+                    type="submit"
+                    disabled={!directUrlInput.trim() || isUploadingRingtone}
+                    className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 hover:text-white border border-zinc-700 disabled:opacity-40 text-zinc-200 font-bold text-xs transition cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Globe className="w-4 h-4 text-indigo-400" />
+                    <span>Применить по ссылке для всех</span>
+                  </button>
+                </form>
+
+                <div className="mt-4 p-3 rounded-xl bg-purple-950/20 border border-purple-500/20 text-[11px] text-zinc-400 flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-purple-400 flex-shrink-0 mt-0.5" />
+                  <span>
+                    Обычные пользователи больше не могут загружать собственные рингтоны — звук централизованно контролируется только администратором.
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Quick Issue PRO by Username Banner ("спомощю юза") */}
+            <div className="bg-gradient-to-r from-amber-950/40 via-purple-950/45 to-[#121216] border-b border-amber-500/25 p-3 sm:p-4">
+              <form onSubmit={handleQuickGrantProByUsername} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 text-sm">
+                    👑
+                  </span>
+                  <span className="text-xs font-bold text-amber-200 whitespace-nowrap">
+                    Выдать PRO по юзу:
+                  </span>
+                </div>
+
+                <div className="relative flex-1 min-w-[140px]">
+                  <span className="absolute left-2.5 top-2 text-amber-400/80 font-mono text-xs font-bold pointer-events-none">@</span>
+                  <input
+                    type="text"
+                    value={quickProUsername}
+                    onChange={(e) => setQuickProUsername(e.target.value)}
+                    placeholder="username"
+                    className="w-full bg-black/40 border border-amber-500/30 rounded-xl pl-6 pr-2.5 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 font-mono focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                {/* Duration selector */}
+                <select
+                  value={quickProDuration === null ? 'perm' : quickProDuration}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setQuickProDuration(v === 'perm' ? null : Number(v));
+                  }}
+                  className="bg-zinc-900 border border-zinc-700 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-400 cursor-pointer"
+                >
+                  <option value="7">7 дней</option>
+                  <option value="30">30 дней</option>
+                  <option value="90">3 месяца</option>
+                  <option value="365">1 год</option>
+                  <option value="perm">Навсегда</option>
+                </select>
+
+                {/* Icon badge selector */}
+                <select
+                  value={quickProIcon}
+                  onChange={(e) => setQuickProIcon(e.target.value)}
+                  className="bg-zinc-900 border border-zinc-700 rounded-xl px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-400 cursor-pointer"
+                >
+                  <option value="👑">👑 Корона</option>
+                  <option value="💎">💎 Алмаз</option>
+                  <option value="⚡">⚡ Молния</option>
+                  <option value="🔥">🔥 Огонь</option>
+                  <option value="⭐">⭐ Звезда</option>
+                </select>
+
+                <button
+                  type="submit"
+                  disabled={isQuickGranting || !quickProUsername.trim()}
+                  className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 text-zinc-950 font-bold text-xs shadow-md shadow-amber-500/20 transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
+                >
+                  <Crown className="w-3.5 h-3.5 fill-zinc-950" />
+                  <span>{isQuickGranting ? 'Выдача...' : 'Выдать PRO'}</span>
+                </button>
+              </form>
+            </div>
 
         {/* Content Body: Split view (User list + Detail Inspector) */}
         <div className="flex-1 flex flex-col sm:flex-row overflow-hidden min-h-[350px]">
@@ -492,7 +882,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   const isCurAdmin = isUserAdmin(user);
                   const isCurPro = isUserPro(user);
                   const isCurBanned = isUserBanned(user);
-                  const isCurFrozen = isUserFrozen(user);
 
                   return (
                     <div
@@ -538,11 +927,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         {isCurBanned && (
                           <span className="text-[9px] bg-red-950 text-red-400 border border-red-800 px-1.5 py-0.5 rounded font-bold">
                             BAN
-                          </span>
-                        )}
-                        {isCurFrozen && (
-                          <span className="text-[9px] bg-cyan-950 text-cyan-400 border border-cyan-800 px-1.5 py-0.5 rounded font-bold">
-                            MUTE
                           </span>
                         )}
                         <ChevronRight className="w-4 h-4 text-zinc-600" />
@@ -597,11 +981,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   {isUserBanned(selectedUser) && (
                     <div className="px-2.5 py-1 rounded-lg bg-red-950/70 border border-red-700 text-red-300 font-medium">
                       Заблокирован {selectedUser.bannedUntil ? `до ${new Date(selectedUser.bannedUntil).toLocaleString('ru')}` : '(Бессрочно)'}
-                    </div>
-                  )}
-                  {isUserFrozen(selectedUser) && (
-                    <div className="px-2.5 py-1 rounded-lg bg-cyan-950/70 border border-cyan-700 text-cyan-300 font-medium">
-                      Заморожен {selectedUser.frozenUntil ? `до ${new Date(selectedUser.frozenUntil).toLocaleString('ru')}` : '(Бессрочно)'}
                     </div>
                   )}
                   {isUserPro(selectedUser) && !isUserAdmin(selectedUser) && (
@@ -705,46 +1084,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   )}
                 </div>
 
-                {/* 3. Freeze Management Module */}
-                <div className="p-3.5 rounded-2xl bg-[#16161c] border border-zinc-800">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5">
-                      <Snowflake className="w-3.5 h-3.5" /> Временная заморозка (Mute)
-                    </span>
-                    {isUserFrozen(selectedUser) ? (
-                      <span className="text-[10px] text-cyan-400 font-bold bg-cyan-950/80 border border-cyan-800 px-2 py-0.5 rounded-md">
-                        ЗАМОРОЖЕН
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-zinc-500 font-medium">Свободен</span>
-                    )}
-                  </div>
-
-                  <p className="text-[11px] text-zinc-400 mb-3">
-                    Замороженный пользователь может только читать сообщения, отправка заблокирована на выбранный срок.
-                  </p>
-
-                  {isUserFrozen(selectedUser) ? (
-                    <button
-                      onClick={() => handleApplyFreeze(false)}
-                      disabled={isSaving}
-                      className="w-full py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-cyan-300 font-bold text-xs border border-cyan-700/40 transition flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Unlock className="w-3.5 h-3.5" /> Разморозить пользователя
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => setShowFreezeDialog(true)}
-                      disabled={isSaving || isUserAdmin(selectedUser)}
-                      className="w-full py-2 rounded-xl bg-cyan-600/20 hover:bg-cyan-600 text-cyan-300 hover:text-white font-bold text-xs border border-cyan-500/40 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                    >
-                      <Snowflake className="w-3.5 h-3.5" /> Заморозить аккаунт на время...
-                    </button>
-                  )}
-                </div>
-
-                {/* 4. PRO Subscription Module */}
-                <div className="p-3.5 rounded-2xl bg-[#16161c] border border-zinc-800">
+                  {/* 3. PRO Subscription Module */}
+                  <div className="p-3.5 rounded-2xl bg-[#16161c] border border-zinc-800">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
                       <Crown className="w-3.5 h-3.5" /> Статус PRO Подписки
@@ -801,6 +1142,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             )}
           </div>
         </div>
+        </>
+        )}
 
         {/* Dialog Modal: BAN Configuration */}
         {showBanDialog && selectedUser && (
@@ -867,77 +1210,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition cursor-pointer"
                 >
                   Забанить
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Dialog Modal: FREEZE Configuration */}
-        {showFreezeDialog && selectedUser && (
-          <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-4">
-            <div className="bg-[#141418] border border-cyan-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl">
-              <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm mb-3">
-                <Snowflake className="w-4 h-4" /> Заморозка @{selectedUser.username}
-              </div>
-
-              <div className="space-y-3 mb-4">
-                <div>
-                  <label className="block text-[10px] text-zinc-400 uppercase font-semibold mb-1">
-                    Длительность заморозки:
-                  </label>
-                  <div className="grid grid-cols-2 gap-1.5 text-xs">
-                    {[
-                      { label: '15 минут', val: 15 },
-                      { label: '1 час', val: 60 },
-                      { label: '24 часа', val: 1440 },
-                      { label: 'Навсегда', val: null }
-                    ].map((opt) => (
-                      <button
-                        key={String(opt.val)}
-                        type="button"
-                        onClick={() => setFreezeDurationMinutes(opt.val)}
-                        className={`py-1.5 px-2 rounded-lg border font-medium transition cursor-pointer ${
-                          freezeDurationMinutes === opt.val
-                            ? 'bg-cyan-950 border-cyan-500 text-cyan-200'
-                            : 'bg-zinc-900 border-zinc-800 text-zinc-400'
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] text-zinc-400 uppercase font-semibold mb-1">
-                    Причина заморозки:
-                  </label>
-                  <input
-                    type="text"
-                    value={freezeReasonInput}
-                    onChange={(e) => setFreezeReasonInput(e.target.value)}
-                    placeholder="Флуд в общих чатах..."
-                    className="w-full bg-[#0e0e11] border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowFreezeDialog(false)}
-                  className="flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold cursor-pointer"
-                >
-                  Отмена
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleApplyFreeze(true)}
-                  disabled={isSaving}
-                  className="flex-1 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition cursor-pointer"
-                >
-                  Заморозить
                 </button>
               </div>
             </div>

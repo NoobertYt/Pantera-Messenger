@@ -58,12 +58,27 @@ export const UserBadge: React.FC<UserBadgeProps> = ({
 
   const isAdmin = isUserAdmin(user);
   const isPro = isUserPro(user);
+  const isBanned = isUserBanned(user);
 
   const sizeClasses = {
     sm: 'text-[9px] px-1.5 py-0.5',
     md: 'text-[10px] px-2 py-0.5',
     lg: 'text-xs px-2.5 py-1'
   }[size];
+
+  // If user is banned, ALWAYS show BAN badge
+  if (isBanned) {
+    return (
+      <span className={`inline-flex items-center align-middle select-none ${className}`}>
+        <span
+          className={`font-black rounded-full tracking-wider uppercase bg-gradient-to-r from-red-700 via-red-600 to-rose-700 text-white shadow-[0_0_10px_rgba(239,68,68,0.5)] border border-red-500 flex items-center gap-1 ${sizeClasses}`}
+          title={user.banReason ? `Аккаунт забанен: ${user.banReason}` : 'Аккаунт заблокирован (БАН)'}
+        >
+          🚫 БАН
+        </span>
+      </span>
+    );
+  }
 
   // If user has admin, ALWAYS show ONLY admin badge
   if (showAdmin && isAdmin) {

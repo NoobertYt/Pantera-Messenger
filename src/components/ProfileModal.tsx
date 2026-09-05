@@ -3,13 +3,15 @@ import { useAuth } from '../context/AuthContext';
 import { DEFAULT_AVATARS, chatService } from '../services/chatService';
 import { UserProfile } from '../types';
 import { UserBadge } from './UserBadge';
-import { X, Camera, ShieldAlert, User, FileText, Check, LogOut, Trash2, Upload, Link, RotateCcw, Sparkles, Crown, Lock, Image as ImageIcon, PhoneCall } from 'lucide-react';
+import { X, Camera, ShieldAlert, User, FileText, Check, LogOut, Trash2, Upload, Link, RotateCcw, Sparkles, Crown, Lock, Image as ImageIcon, PhoneCall, Music, Play, Square, Volume2, FileAudio, AlertCircle, RefreshCw } from 'lucide-react';
+import { CustomRingtoneMetadata, soundService } from '../services/audioService';
 
 interface ProfileModalProps {
   onClose: () => void;
+  onOpenAdmin?: () => void;
 }
 
-export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
+export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, onOpenAdmin }) => {
   const { currentUser, updateProfile, logout, toggleBlock, isPro, isAdmin } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'blacklist'>('profile');
@@ -24,10 +26,29 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
   const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [customUrlInput, setCustomUrlInput] = useState('');
+  const [isPlayingRingtone, setIsPlayingRingtone] = useState(soundService.getIsPreviewPlaying());
+  const [ringtoneVol, setRingtoneVol] = useState(soundService.getVolume());
+  const [customRingtoneMeta, setCustomRingtoneMeta] = useState<CustomRingtoneMetadata | null>(
+    soundService.getCustomRingtoneMeta()
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Blacklisted profiles resolution
   const [blockedProfiles, setBlockedProfiles] = useState<UserProfile[]>([]);
+
+  React.useEffect(() => {
+    const unsubPreview = soundService.subscribePreview((playing) => {
+      setIsPlayingRingtone(playing);
+    });
+    const unsubMeta = soundService.subscribeCustomRingtone((meta) => {
+      setCustomRingtoneMeta(meta);
+    });
+    return () => {
+      unsubPreview();
+      unsubMeta();
+      soundService.stopAll();
+    };
+  }, []);
 
   React.useEffect(() => {
     if (currentUser?.blockedUsers?.length) {
@@ -167,7 +188,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
         bio: bio.trim(),
         avatarUrl,
         onlyProCanMessage: isPro || isAdmin ? onlyProCanMessage : false,
-        onlyProCalls
+        onlyProCalls: isPro || isAdmin ? onlyProCalls : false
       });
       setUsername(updated.username);
       if (updated.username.toLowerCase() !== cleanUsername.toLowerCase()) {
@@ -449,7 +470,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
             <div className="bg-[#121214] border border-zinc-800/80 rounded-2xl p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-400 flex items-center justify-center">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                    isPro || isAdmin
+                      ? 'bg-purple-500/15 border border-purple-500/30 text-purple-400'
+                      : 'bg-zinc-800/60 border border-zinc-700/50 text-zinc-400'
+                  }`}>
                     <PhoneCall className="w-4 h-4" />
                   </div>
                   <div>
@@ -465,15 +490,157 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
                   </div>
                 </div>
 
-                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                {isPro || isAdmin ? (
+                  <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={onlyProCalls}
+                      onChange={(e) => setOnlyProCalls(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                  </label>
+                ) : (
+                  <div className="text-[11px] text-zinc-400 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-xl flex items-center gap-1 flex-shrink-0">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Нужен PRO</span>
+                  </div>
+                )}
+              </div>
+              {!isPro && !isAdmin && (
+                <p className="text-[11px] text-zinc-500 mt-2.5 pt-2 border-t border-zinc-800/60">
+                  👑 Настройка доступна только пользователям с PRO статусом. Обычные пользователи не могут включить ограничение звонков.
+                </p>
+              )}
+            </div>
+
+            {/* Global Ringtone Display & Player Card */}
+            <div className="bg-[#121214] border border-purple-500/30 rounded-2xl p-4 shadow-lg shadow-purple-950/20">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border ${
+                    customRingtoneMeta
+                      ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                      : 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                  }`}>
+                    {customRingtoneMeta ? (
+                      <FileAudio className="w-5 h-5 animate-pulse" />
+                    ) : (
+                      <Music className="w-5 h-5 animate-pulse" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
+                      <span>Мелодия звонков (Рингтон)</span>
+                      <span className="text-[9px] bg-purple-950/80 text-purple-300 border border-purple-600/50 px-1.5 py-0.5 rounded font-extrabold flex items-center gap-1">
+                        <Check className="w-2.5 h-2.5" /> ОБЩИЙ РИНГТОН
+                      </span>
+                    </div>
+                    <div className="text-xs font-semibold text-purple-300 mt-0.5 flex items-center gap-1.5 truncate max-w-[210px] sm:max-w-[280px]">
+                      <span className="truncate">{soundService.getRingtoneTitle()}</span>
+                      {customRingtoneMeta?.duration && (
+                        <span className="text-[10px] text-zinc-500 font-mono flex-shrink-0">
+                          {Math.round(customRingtoneMeta.duration)} сек
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => soundService.togglePreviewRingtone()}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                      isPlayingRingtone
+                        ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-950/50 animate-pulse'
+                        : 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-950/50'
+                    }`}
+                    title={isPlayingRingtone ? 'Остановить воспроизведение' : 'Прослушать рингтон'}
+                  >
+                    {isPlayingRingtone ? (
+                      <>
+                        <Square className="w-3.5 h-3.5 fill-current" />
+                        <span>Пауза</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        <span>Слушать</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Animated Equalizer Waveform when playing */}
+              {isPlayingRingtone && (
+                <div className="flex items-center justify-center gap-1 py-2 px-3 mb-3 rounded-xl bg-purple-950/50 border border-purple-500/30">
+                  {[45, 90, 65, 100, 75, 40, 85, 95, 60, 80, 50, 95, 70, 45, 85].map((h, i) => (
+                    <span
+                      key={i}
+                      style={{ height: `${h * 0.22}px` }}
+                      className="w-1 bg-purple-400 rounded-full animate-pulse"
+                    />
+                  ))}
+                  <span className="text-[10px] text-purple-300 font-mono ml-2 font-medium">
+                    Воспроизведение...
+                  </span>
+                </div>
+              )}
+
+              {/* Centralized explanation notice */}
+              <div className="text-[11px] text-zinc-400 bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-2.5 mb-3 flex items-start gap-2">
+                <Music className="w-3.5 h-3.5 text-purple-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <span>
+                    Эта мелодия играет при всех входящих и исходящих звонках для каждого пользователя. Мелодия централизованно устанавливается администратором приложения.
+                  </span>
+                  {isAdmin && onOpenAdmin && (
+                    <div className="mt-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenAdmin();
+                        }}
+                        className="text-purple-300 hover:text-purple-200 underline font-semibold flex items-center gap-1"
+                      >
+                        Сменить рингтон для всех пользователей в Админ-панели →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Volume Slider & Info */}
+              <div className="flex items-center justify-between gap-3 pt-2.5 border-t border-zinc-800/80 text-[11px] text-zinc-400">
+                <span className="flex items-center gap-1.5">
+                  <Volume2 className="w-3.5 h-3.5 text-zinc-400" />
+                  Громкость рингтона:
+                </span>
+                <div className="flex items-center gap-2">
                   <input
-                    type="checkbox"
-                    checked={onlyProCalls}
-                    onChange={(e) => setOnlyProCalls(e.target.checked)}
-                    className="sr-only peer"
+                    type="range"
+                    min="0.1"
+                    max="1"
+                    step="0.05"
+                    value={ringtoneVol}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setRingtoneVol(v);
+                      soundService.setVolume(v);
+                    }}
+                    className="w-24 accent-purple-500 h-1.5 bg-zinc-800 rounded-lg cursor-pointer"
                   />
-                  <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                </label>
+                  <span className="text-[10px] font-mono text-zinc-300 w-8 text-right">
+                    {Math.round(ringtoneVol * 100)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-2 text-[10px] text-zinc-500">
+                ✓ Рингтон сохраняется локально в браузере и автоматически звучит при входящих и исходящих звонках.
               </div>
             </div>
 

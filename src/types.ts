@@ -46,6 +46,7 @@ export interface ChatMessage {
   senderAvatar?: string;
   senderIsPro?: boolean;
   senderIsAdmin?: boolean;
+  senderIsBanned?: boolean;
   senderProBadge?: string;
   text?: string;
   photoUrl?: string;

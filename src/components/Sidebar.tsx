@@ -639,8 +639,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="text-xs font-bold text-zinc-100 uppercase tracking-tight truncate max-w-[130px]">
                 {currentUser.displayName}
               </div>
-              <div className="text-[10px] text-zinc-500 font-mono">
-                @{currentUser.username}
+              <div className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
+                <span>@{currentUser.username}</span>
               </div>
             </div>
           </div>

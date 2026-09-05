@@ -12,7 +12,8 @@ import {
   MonitorUp,
   Minimize2,
   Maximize2,
-  PictureInPicture
+  PictureInPicture,
+  Music
 } from 'lucide-react';
 import { CallSession, UserProfile, RtcCandidate } from '../types';
 import { soundService } from '../services/audioService';
@@ -746,6 +747,10 @@ export const CallModal: React.FC<CallModalProps> = ({
                 Гудки... Соединение
               </span>
               <span className="text-zinc-500 text-xs">Ожидание ответа абонента в сети</span>
+              <div className="mt-2 flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-950/70 border border-purple-500/40 text-purple-300 text-[11px] shadow-sm max-w-[90%] truncate">
+                <Music className="w-3.5 h-3.5 text-purple-300 animate-pulse flex-shrink-0" />
+                <span className="truncate">Мелодия вызова: {soundService.getRingtoneTitle()}</span>
+              </div>
             </div>
           )}
 
@@ -757,6 +762,11 @@ export const CallModal: React.FC<CallModalProps> = ({
               <span className="text-zinc-500 text-xs">
                 {call.type === 'video' ? 'Видеозвонок' : 'Голосовой звонок'}
               </span>
+              <div className="mt-2 flex items-center gap-2 px-3 py-1 rounded-full bg-purple-950/80 border border-purple-500/50 text-purple-200 text-[11px] shadow-md max-w-[90%] truncate">
+                <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping flex-shrink-0" />
+                <Music className="w-3.5 h-3.5 text-purple-300 flex-shrink-0" />
+                <span className="font-semibold truncate">Рингтон: {soundService.getRingtoneTitle()}</span>
+              </div>
             </div>
           )}
 

@@ -623,6 +623,11 @@ export class ChatService {
     const sUsername = sender.username?.trim().toLowerCase() || '';
     const isAdmin = (sender.role === 'admin') || (sender.isAdmin === true) || sEmail === 'admin123123@admin.com' || sUsername === 'admin123123';
     const isPro = !isAdmin && Boolean(sender.isPro) && (!sender.proUntil || Date.now() <= sender.proUntil);
+    const isBanned = Boolean(sender.isBanned) && (!sender.bannedUntil || Date.now() < sender.bannedUntil);
+
+    if (isBanned) {
+      throw new Error('Ваш аккаунт заблокирован (БАН). Отправка сообщений запрещена.');
+    }
 
     const newMsg: ChatMessage = {
       id: messageId,
@@ -632,6 +637,7 @@ export class ChatService {
       senderAvatar: sender.avatarUrl,
       senderIsAdmin: isAdmin,
       senderIsPro: isPro,
+      senderIsBanned: isBanned,
       senderProBadge: sender.proBadgeIcon || (isPro ? '👑' : undefined),
       text: text || '',
       type,

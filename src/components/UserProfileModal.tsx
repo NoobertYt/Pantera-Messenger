@@ -49,18 +49,23 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const isTargetPro = isUserPro(user);
   const isTargetBanned = isUserBanned(user);
   const isTargetFrozen = isUserFrozen(user);
+  const isCurrentBanned = isUserBanned(currentUser);
 
   const canMessageTarget =
-    !user.onlyProCanMessage ||
+    !isCurrentBanned &&
+    !isTargetBanned &&
+    (!user.onlyProCanMessage ||
     currentUserIsAdmin ||
     currentUserIsPro ||
-    isSelf;
+    isSelf);
 
   const canCallTarget =
-    !user.onlyProCalls ||
+    !isCurrentBanned &&
+    !isTargetBanned &&
+    (!user.onlyProCalls ||
     currentUserIsAdmin ||
     currentUserIsPro ||
-    isSelf;
+    isSelf);
 
   const handleCopyUsername = () => {
     navigator.clipboard.writeText(`@${user.username}`);
