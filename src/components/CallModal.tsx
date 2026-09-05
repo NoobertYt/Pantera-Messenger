@@ -7,13 +7,16 @@ import {
   Video,
   VideoOff,
   Volume2,
+  VolumeX,
   ShieldCheck,
   AlertCircle,
   MonitorUp,
   Minimize2,
   Maximize2,
   PictureInPicture,
-  Music
+  Music,
+  Activity,
+  RefreshCw
 } from 'lucide-react';
 import { CallSession, UserProfile, RtcCandidate } from '../types';
 import { soundService } from '../services/audioService';
@@ -26,12 +29,27 @@ interface CallModalProps {
   onAcceptCall?: () => void;
 }
 
+// Multi-STUN + OpenRelay TURN configuration to guarantee NAT & firewall traversal
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' }
-  ]
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.services.mozilla.com' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
+      username: 'openrelay',
+      credential: 'openrelay'
+    }
+  ],
+  iceCandidatePoolSize: 10
 };
 
 export const CallModal: React.FC<CallModalProps> = ({
